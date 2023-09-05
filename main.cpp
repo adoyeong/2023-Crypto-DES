@@ -91,14 +91,38 @@ byte s8[4][16] = {
 	7, 11,  4,  1,  9, 12, 14,  2,  0,  6, 10, 13, 15,  3,  5,  8,
 	2,  1, 14,  7,  4, 10,  8, 13, 15, 12,  9,  0,  3,  5,  6, 11
 };
+byte pbd[56] = {
+57, 49, 41, 33, 25, 17,  9,
+1, 58, 50, 42, 34, 26, 18,
+10,  2, 59, 51, 43, 35, 27,
+19, 11,  3, 60, 52, 44, 36,
+63, 55, 47, 39, 31, 23, 15,
+7, 62, 54, 46, 38, 30, 22,
+14,  6, 61, 53, 45, 37, 29,
+21, 13,  5, 28, 20, 12,  4
+};
+byte cpbox[48] =
+{
+14, 17, 11, 24,  1,  5,
+3, 28, 15,  6, 21, 10,
+23, 19, 12,  4, 26,  8,
+16,  7, 27, 20, 13,  2,
+41, 52, 31, 37, 47, 55,
+30, 40, 51, 45, 33, 48,
+44, 49, 39, 56, 34, 53,
+46, 42, 50, 36, 29, 32
+};
+byte shift[16] = { 1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1 };
 byte plain[65];
 byte block[65];
 byte cipher[65];
 byte expanded[49];
 byte fout[33];
 byte sout[33];
-byte round_key[16][49];
+byte round_key[17][49];
 byte left[33], right[33];
+byte keytmp[57];
+byte key[65];
 void IP(void)
 {
 	for (int i = 0; i < 64; i++)
@@ -176,47 +200,115 @@ void round(int n)
 		right[i] = block[i + 32];
 	}
 	f_function(n);
-	for (i = 1; i < 33; i++)
+	if (n == 16)
 	{
-		block[i] = right[i];
-		block[i + 32] = left[i] ^ fout[i];
+		for (i = 1; i < 33; i++)
+		{
+			block[i + 32] = right[i];
+			block[i] = left[i] ^ fout[i];
+		}
+	}
+	else
+	{
+		for (i = 1; i < 33; i++)
+		{
+			block[i] = right[i];
+			block[i + 32] = left[i] ^ fout[i];
+		}
+	}
+
+}
+void pbdrop()
+{
+	for (int i = 0; i < 56; i++)
+	{
+		keytmp[i + 1] = key[pbd[i]];
+	}
+}
+void rkeygen(int n) //shift and compression p-box
+{
+	int i;
+	//shift
+	byte mem1, mem2, move;
+	move = shift[n - 1];
+	//left
+	mem1 = keytmp[1];
+	if (move == 2) mem2 = keytmp[2];
+	for (i = 1 + move; i < 29; i++)
+	{
+		keytmp[i - move] = keytmp[i];
+	}
+	if (move == 1) keytmp[28] = mem1;
+	else
+	{
+		keytmp[27] = mem1;
+		keytmp[28] = mem2;
+	}
+	//right
+	mem1 = keytmp[29];
+	if (move == 2) mem2 = keytmp[30];
+	for (i = 29 + move; i < 57; i++)
+	{
+		keytmp[i - move] = keytmp[i];
+	}
+	if (move == 1) keytmp[56] = mem1;
+	else
+	{
+		keytmp[55] = mem1;
+		keytmp[56] = mem2;
+	}
+
+	//compression
+	for (i = 1; i < 49; i++)
+	{
+		round_key[n][i] = keytmp[cpbox[i-1]];
 	}
 }
 int main(int argc, char** argv)
 {
-	if (argc != 2)
+	int i;
+	if (argc != 3)
 	{
-		printf("Give only plaintext\n");
+		printf("[syntax error]\n");
+		printf("syntax : des <key(8bytes)> <plaintext(8bytes)>\n");
+		printf("sample : des 0123456789ABCDEF 133457799BBCDFF1\n");
 		return -1;
 	}
 
 	// convert string to bit
-	qword input = std::stoi(argv[1]);
-	std::cout << input;
-	for (int i = 0; i < 64; i++)
+	qword input = strtoull(argv[1], NULL, 16);
+	qword initkey = strtoull(argv[2], NULL, 16);
+	for (i = 0; i < 64; i++)
 	{
 		plain[64 - i] = input & 1;
 		input = input >> 1;
 	}
-	printf("\n");
-	for (int i = 1; i < 65; i++)
+	for (i = 0; i < 64; i++)
 	{
-		printf("%d", plain[i]);
-		if (i % 4 == 0) printf(" ");
+		key[64 - i] = initkey & 1;
+		initkey = initkey >> 1;
 	}
-	IP();
-	printf("\n");
-	for (int i = 1; i < 65; i++)
+
+	//key scheduling
+	pbdrop(); 
+	for (i = 1; i < 17; i++)
 	{
-		printf("%d", block[i]);
-		if (i % 4 == 0) printf(" ");
+		rkeygen(i);
 	}
+
+	IP(); 
+	for (i = 1; i < 17; i++) round(i);
 	FP();
-	printf("\n");
-	for (int i = 1; i < 65; i++)
+	printf("\nBit : ");
+
+	qword hexcipher = 0;
+	for (i = 1; i < 65; i++)
 	{
+		hexcipher = (hexcipher << 1) | cipher[i];
 		printf("%d", cipher[i]);
 		if (i % 4 == 0) printf(" ");
 	}
+	printf("\nHex : %llx\n", hexcipher);
+	printf("\n");
 	return 0;
 }
